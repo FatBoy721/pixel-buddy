@@ -26,17 +26,19 @@ from PySide6.QtGui import (
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QWidget
 
+import hardware
+import update
 import web
 from brain import (
-    CLI_BRAINS, INSTALL_PAGES, RuleBrain, available_brains, find_ollama, model_label, model_options,
-    setup_brain, smarts, stop_server,
+    CLI_BRAINS, FETCH_REQUEST, INSTALL_PAGES, WEB_HINTS, RuleBrain, available_brains, find_ollama,
+    install_and_pull, model_label, model_options, setup_brain, smarts, stop_server,
 )
 from desktop import show_everywhere
 from lines import clean_language, line
 from preview import make_preview
 from search import FileIndex
 from voice import Voice
-from ui import MONO, HistoryBox, InputBox, ResultCard, WebCard
+from ui import MONO, HistoryBox, InputBox, ModelCard, ResultCard, WebCard
 
 ASSETS = Path(__file__).parent / "assets"
 SCALE = 4                   # 32px sprites -> 128px on screen
@@ -45,7 +47,7 @@ SPRITE = SPRITE_PX * SCALE
 WIN_W, WIN_H = 420, 300     # room around the crab for bubbles and the carried file
 TICK_MS = 33                # ~30 fps movement
 FRAME_MS = {"walk": 140, "idle": 500, "sleep": 900, "happy": 250, "confused": 400, "pull": 170,
-            "game_modern": 160, "game_retro": 220}
+            "game_modern": 160, "game_retro": 220, "inspect": 320, "install": 240}
 GAMING = ("game_modern", "game_retro")
 GAME_CHANCE = 0.15          # chance an idle break turns into a gaming session
 GAME_SECONDS = (20, 45)
@@ -59,6 +61,7 @@ SLEEP_AFTER_S = 60          # nap after this long without being clicked
 MIN_SEARCH_S = 2.5          # always put on a bit of a show
 OFFSCREEN_S = 1.2           # how long he's "gone" fetching the file
 PREVIEW_WAIT_S = 5          # max extra time offscreen waiting for a preview image
+MIN_INSPECT_S = 7           # the hardware check is quick; the show shouldn't be
 ROPE_CLAW = (13, 70)        # gripping claw centre, from the sprite's rope-side edge
 HOLD_Y = 50                 # light files: bottom edge sits in his raised claws
 
@@ -66,7 +69,15 @@ ROPE = QColor(201, 154, 91)
 ROPE_DARK = QColor(92, 58, 30)
 ROPE_STRAND = QColor(140, 98, 53)
 
-TASK_MODES = {"searching", "found", "exiting", "offscreen", "returning", "presenting"}
+TASK_MODES = {"searching", "found", "exiting", "offscreen", "returning", "presenting",
+              "inspecting", "installing", "updating"}
+
+# "install ollama" / "get a brain", typed into the chat box.
+BRAIN_REQUEST = re.compile(
+    r"\b(install|get|download|set ?up|find)\b.{0,20}\b(ollama|a brain|your brain|local ai|local model)\b"
+    r"|\b(check|scan|look at)\b.{0,20}\b(my )?(specs|hardware|rig|pc|computer|machine)\b",
+    re.I,
+)
 
 # Typed voice switches, handled before the brain sees the message.
 MUTE_REQUEST = re.compile(r"^\W*(shut ?up|be quiet|mute|stop talking|quiet|hush|silence|shh+)\b", re.I)
@@ -266,6 +277,13 @@ class Buddy(QWidget):
         self.chat.set_status("brain: waking up…")
         self.card = ResultCard()
         self.web_card = WebCard()
+        self.model_card = ModelCard()   # hardware check → the brains this machine can run
+        self.model_card.chosen.connect(self.install_brain)
+        self.specs = None
+        self.specs_job = None
+        self.install_job = None
+        self.update_job = None
+        self.next_show_line = 0.0       # paces his chatter while inspecting / downloading
 
         floor = self.floor_rect()
         self.x_pos = float(floor.center().x() - WIN_W // 2)
@@ -692,6 +710,141 @@ class Buddy(QWidget):
             self.card_preview_count = len(self.previews)
             self.card.show_hits(self.hits, self.previews, self.geometry())
 
+    # --- checking the machine, then installing a brain -------------------------
+
+    def start_hardware_check(self):
+        """Out comes the magnifying glass: he reads the machine, then lists the
+        local brains it can actually run."""
+        if self.mode in TASK_MODES or self.mode == "thinking":
+            self.speak("busy", 1.5)
+            return
+        self.input.close_card()
+        self.card.hide()
+        self.web_card.hide()
+        self.model_card.hide()
+        self.mode = "inspecting"
+        self.set_state("inspect")
+        self.speak("inspect_start", 3)
+        self.mode_until = time.monotonic() + MIN_INSPECT_S
+        self.next_show_line = time.monotonic() + 3
+        self.specs_job = self.net.submit(hardware.scan)  # the file index keeps the worker busy
+
+    def do_inspecting(self, now):
+        self.set_state("inspect")
+        if now >= self.next_show_line and now > self.bubble_until:
+            self.speak("inspecting", 2.5)
+            self.next_show_line = now + random.uniform(2.5, 3.5)
+        if now < self.mode_until or not self.specs_job.done():
+            return
+        try:
+            self.specs = self.specs_job.result()
+        except Exception as err:  # noqa: BLE001 - never leave him stuck mid-inspection
+            print(f"hardware scan failed: {err}", file=sys.stderr)
+            self.after_task()
+            self.set_state("confused", 3)
+            return
+        self.specs_job = None
+        self.reply(line("inspect_done", self.settings["potty_mouth"], specs=self.specs.summary()))
+        self.model_card.show_picks(self.specs, hardware.rank(self.specs), self.geometry())
+        self.after_task()
+        self.set_state("happy", 2)
+        QTimer.singleShot(1200, lambda: self.speak("picks_ready", 5))
+
+    def install_brain(self, model):
+        """Go get Ollama (if it's missing) and download `model`."""
+        self.mode = "installing"
+        self.set_state("install")
+        self.speak("install_start", 3)
+        self.brain_progress = ""
+        self.next_show_line = time.monotonic() + 3
+        self.install_job = self.net.submit(install_and_pull, model, self._brain_progress)
+
+    def do_installing(self, now):
+        self.set_state("install")
+        # Ollama's own download reports percentages; winget doesn't, so he fills the
+        # quiet stretches with lines instead of a dead bubble.
+        if self.brain_progress:
+            self.bubble, self.bubble_until = self.brain_progress, now + 1
+        elif now >= self.next_show_line and now > self.bubble_until:
+            self.speak("installing", 2.5)
+            self.next_show_line = now + random.uniform(3, 5)
+        if not self.install_job.done():
+            return
+        try:
+            model = self.install_job.result()
+        except Exception as err:  # noqa: BLE001 - surface whatever went wrong and hand off the page
+            reason = str(err).strip().splitlines()[0][:90] if str(err).strip() else type(err).__name__
+            print(f"brain install failed: {err}", file=sys.stderr)
+            self.install_job = None
+            self.brain_progress = ""
+            self.after_task()
+            self.set_state("confused", 4)
+            self.reply(line("install_failed", self.settings["potty_mouth"], err=reason))
+            QDesktopServices.openUrl(QUrl(INSTALL_PAGES["local"]))
+            return
+        self.install_job = None
+        self.brain_progress = ""
+        self.models()["local"] = model
+        self.settings["brain"] = "local"
+        save_settings(self.settings)
+        self.after_task()
+        self.set_state("happy", 3)
+        self.reply(line("install_done", self.settings["potty_mouth"], model=model))
+        self.chat.set_status("brain: waking up…")
+        self.load_brain()
+
+    # --- updating himself ------------------------------------------------------
+
+    def check_for_updates(self):
+        """Ask GitHub for a newer build. He reuses the download animation: same job,
+        he's just fetching himself this time."""
+        if not update.frozen():  # from source there's nothing to swap out
+            self.speak("update_source", 6)
+            QDesktopServices.openUrl(QUrl(update.RELEASES_PAGE))
+            return
+        if self.mode in TASK_MODES or self.mode == "thinking":
+            self.speak("busy", 1.5)
+            return
+        self.input.close_card()
+        self.model_card.hide()
+        self.mode = "updating"
+        self.set_state("install")
+        self.speak("update_checking", 3)
+        self.brain_progress = ""
+        self.next_show_line = time.monotonic() + 3
+        self.update_job = self.net.submit(update.check_and_stage, self._brain_progress)
+
+    def do_updating(self, now):
+        self.set_state("install")
+        if self.brain_progress:
+            self.bubble, self.bubble_until = self.brain_progress, now + 1
+        elif now >= self.next_show_line and now > self.bubble_until:
+            self.speak("installing", 2.5)  # same "reeling it in" chatter
+            self.next_show_line = now + random.uniform(3, 5)
+        if not self.update_job.done():
+            return
+        try:
+            found = self.update_job.result()
+        except Exception as err:  # noqa: BLE001 - offline, private repo, no build for this OS
+            reason = str(err).strip().splitlines()[0][:90] if str(err).strip() else type(err).__name__
+            print(f"update check failed: {err}", file=sys.stderr)
+            self.update_job = None
+            self.brain_progress = ""
+            self.after_task()
+            self.set_state("confused", 4)
+            self.reply(line("update_failed", self.settings["potty_mouth"], err=reason))
+            return
+        self.update_job = None
+        self.brain_progress = ""
+        if not found:
+            self.after_task()
+            self.speak("update_none", 4, version=update.VERSION)
+            return
+        tag, new_build = found
+        self.speak("update_ready", 4, tag=tag)
+        update.apply_update(new_build)  # the swap script waits for this process to exit
+        QTimer.singleShot(1500, QApplication.quit)
+
     # --- actions -------------------------------------------------------------
 
     def refresh_previews(self):
@@ -753,10 +906,23 @@ class Buddy(QWidget):
         if (self.mode in TASK_MODES and self.mode != "presenting") or self.mode == "thinking":
             self.reply(line("busy", self.settings["potty_mouth"]))
             return
+        if BRAIN_REQUEST.search(text):  # "install ollama" / "check my specs": no brain needed
+            self.chat.add("you", escape(text))
+            self.history.append({"role": "user", "content": text})
+            self.start_hardware_check()
+            return
         self.card.hide()
         self.web_card.hide()
         self.history.append({"role": "user", "content": text})
         self.chat.add("you", escape(text))
+        # An unmistakable "go get me a file" doesn't need a model to interpret it, and
+        # waiting on one just makes him stand there. Anything vaguer still goes to the brain.
+        if FETCH_REQUEST.search(text) and not WEB_HINTS.search(text):
+            decision = RuleBrain().decide(self.history, self.settings["potty_mouth"])
+            if decision.action == "find_files" and decision.query:
+                self.reply(decision.text)
+                self.start_search(decision.query)
+                return
         self.mode = "thinking"
         brain, history, spicy = self.brain, list(self.history), self.settings["potty_mouth"]
         self.think_job = self.thinker.submit(brain.decide, history, spicy)
@@ -1025,8 +1191,9 @@ class Buddy(QWidget):
                      for key, label in CLI_BRAINS.items()]
         for kind, title in sections:
             if (kind in CLI_BRAINS and kind not in installed) or (kind == "local" and not find_ollama()):
-                name = CLI_BRAINS.get(kind, "Ollama (free, private, offline)")
-                get = QAction(f"Get {name}…  (not installed)", brains)
+                if kind == "local":  # he can do this one himself
+                    continue
+                get = QAction(f"Get {CLI_BRAINS[kind]}…  (not installed)", brains)
                 get.triggered.connect(lambda _c, k=kind: self.open_install_page(k))
                 brains.addAction(get)
                 continue
@@ -1045,6 +1212,10 @@ class Buddy(QWidget):
                 action.triggered.connect(lambda _c, k=kind, m=model: self.set_brain(k, m))
                 sub.addAction(action)
         brains.addSeparator()
+        add_brain = QAction(("Find me a brain 🔍  (Ollama not installed)" if not find_ollama()
+                             else "Check my hardware 🔍"), brains)
+        add_brain.triggered.connect(lambda _c: self.start_hardware_check())
+        brains.addAction(add_brain)
         off = QAction("Keywords only (no AI)", brains, checkable=True, checked=current_brain == "keywords")
         off.triggered.connect(lambda _c: self.set_brain("keywords"))
         brains.addAction(off)
@@ -1057,6 +1228,7 @@ class Buddy(QWidget):
             action.triggered.connect(lambda _checked, k=key: self.set_game_style(k))
             games.addAction(action)
 
+        add(f"Check for updates…  (v{update.VERSION})", self.check_for_updates)
         add("Show crab" if not self.isVisible() else "Hide crab", self.toggle_hidden)
         voices = menu.addMenu("Voice: " + (self.voice.current_name() if self.voice.enabled else "Off 🔇"))
         off = QAction("🔇 Off (silent)", voices, checkable=True, checked=not self.voice.enabled)
@@ -1085,7 +1257,8 @@ class Buddy(QWidget):
         if keyword_only or self.settings.get("brain", "local") == "local":
             self.settings["upgrade_tip_shown"] = True
             save_settings(self.settings)
-            QTimer.singleShot(6000, lambda: self.speak("no_ai_tip" if keyword_only else "smarter_tip", 9))
+            tip = "no_ollama_offer" if not find_ollama() else "no_ai_tip" if keyword_only else "smarter_tip"
+            QTimer.singleShot(6000, lambda: self.speak(tip, 10))
 
     def set_local_auto(self):
         self.models().pop("local", None)
@@ -1124,7 +1297,7 @@ class Buddy(QWidget):
 
     def toggle_hidden(self):
         if self.isVisible():
-            for window in (self, self.input, self.card, self.web_card, self.chat):
+            for window in (self, self.input, self.card, self.web_card, self.model_card, self.chat):
                 window.hide()
         else:
             self.show()

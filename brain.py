@@ -315,6 +315,53 @@ def stop_server():
         _server.terminate()
 
 
+INSTALL_TIMEOUT_S = 900  # winget / brew pulling a few hundred MB over a bad line
+
+
+def install_ollama(progress=lambda text: None):
+    """Install Ollama with whatever package manager this machine already has.
+    True if it's installed afterwards; False means the user has to do it by hand."""
+    if find_ollama():
+        return True
+    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    if sys.platform == "win32":
+        cmd = ["winget", "install", "-e", "--id", "Ollama.Ollama", "--silent",
+               "--accept-package-agreements", "--accept-source-agreements"]
+    elif sys.platform == "darwin" and shutil.which("brew"):
+        cmd = ["brew", "install", "--cask", "ollama"]
+    elif sys.platform not in ("win32", "darwin"):
+        cmd = ["sh", "-c", "curl -fsSL https://ollama.com/install.sh | sh"]
+    else:
+        return False  # no Homebrew on this Mac: he sends them to the download page
+    try:
+        done = subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=INSTALL_TIMEOUT_S, creationflags=flags)
+    except (OSError, subprocess.SubprocessError) as err:
+        print(f"couldn't install Ollama: {err}", file=sys.stderr)
+        return False
+    if done.returncode != 0:
+        print(f"Ollama install failed ({done.returncode}): {done.stderr[-300:] or done.stdout[-300:]}",
+              file=sys.stderr)
+    # winget lands it in LOCALAPPDATA without touching this process's PATH, so ask
+    # find_ollama() rather than trusting the exit code.
+    return find_ollama() is not None
+
+
+def install_and_pull(model, progress=lambda text: None):
+    """The whole job: get Ollama, start it, download `model`. Returns the model name.
+    Raises RuntimeError with something quotable if a step fails."""
+    if not find_ollama():
+        progress("Reeling Ollama in from the cloud…")
+        if not install_ollama(progress):
+            raise RuntimeError("couldn't install Ollama automatically")
+    progress("Booting my brain up…")
+    if not start_server():
+        raise RuntimeError("Ollama is installed but won't start")
+    if model not in installed_models():
+        pull(model, progress)
+    return model
+
+
 def pull(model, progress):
     """Download a model, calling progress(text) as it goes."""
     request = urllib.request.Request(
@@ -419,8 +466,12 @@ class CLIBrain:
                    "-C", SANDBOX, "--color", "never", "-o", out_file]
             cmd += (["-m", self.model] if self.model else []) + ["-"]
             stdin = system + "\n\n" + prompt
+        # encoding= is not optional: text=True alone would encode stdin with the Windows
+        # locale codepage, and both CLIs reject anything that isn't UTF-8. One "…" or a
+        # smart quote in a web snippet is enough to fail the whole call.
         done = subprocess.run(cmd, input=stdin, capture_output=True, text=True, cwd=SANDBOX,
-                              env=cli_env(), timeout=CLI_TIMEOUT_S, creationflags=flags)
+                              env=cli_env(), timeout=CLI_TIMEOUT_S, creationflags=flags,
+                              encoding="utf-8", errors="replace")
         if self.kind == "claude":
             result = json.loads(done.stdout or "{}")
             if result.get("is_error") or "Not logged in" in result.get("result", ""):

@@ -388,6 +388,162 @@ def draw_tv(style, frame):
     return c.image()
 
 
+# --- inspecting your hardware ----------------------------------------------------
+
+PCB = (28, 110, 62, 255)
+PCB_DARK = (18, 78, 44, 255)
+GOLD = (218, 178, 70, 255)
+CHIP = (40, 40, 48, 255)
+SILVER = (185, 190, 200, 255)
+GLASS = (168, 222, 250, 140)
+GLASS_GLINT = (255, 255, 255, 255)
+RIM = (95, 95, 110, 255)
+HANDLE = (120, 72, 40, 255)
+
+
+def draw_motherboard(c):
+    """The board on the ground he's crouched over: PCB, traces, chips, RAM slot."""
+    rect(c, 1, 24, 30, 30, PCB)
+    rect(c, 1, 30, 30, 30, PCB_DARK)
+    for y in (26, 29):                              # gold traces running across it
+        for x in range(2, 30, 2):
+            c.set(x, y, GOLD)
+    rect(c, 4, 25, 10, 28, CHIP)                    # the big chip
+    for x in range(4, 11, 2):                       # its pins
+        c.set(x, 29, GOLD)
+    rect(c, 13, 25, 14, 29, SILVER)                 # RAM stick in its slot
+    rect(c, 16, 25, 17, 29, SILVER)
+    rect(c, 20, 26, 22, 28, CHIP)                   # smaller chips
+    rect(c, 25, 27, 27, 28, CHIP)
+    for x in (24, 28):                              # capacitors
+        c.set(x, 25, SILVER)
+        c.set(x, 26, SILVER)
+
+
+def draw_magnifier(c, cx, cy):
+    """A round glass with a handle, drawn over whatever is under it."""
+    for y in range(SIZE):
+        for x in range(SIZE):
+            d = ((x - cx) ** 2 + (y - cy) ** 2) ** 0.5
+            if d <= 3.2:
+                c.set(x, y, GLASS)
+            elif d <= 4.4:
+                c.set(x, y, RIM)
+    c.line(cx + 3, cy + 3, cx + 6, cy + 6, HANDLE, mirror=False)
+    c.line(cx + 4, cy + 3, cx + 7, cy + 6, HANDLE, mirror=False)
+
+
+def eyes_looking(c, left, right, bob, down=1, side=1):
+    """Two 3x3 eyes at (x, y) top-left each, with a 1x2 pupil like the rest of his
+    frames. down/side nudge the pupils so he's clearly looking somewhere. Returns the
+    pupil-drawing step: run it after outline(), so the pupils land inside the white
+    instead of under the dark ring around it."""
+    for x, y in (left, right):
+        rect(c, x, y + bob, x + 2, y + 2 + bob, EYE_WHITE)
+    return lambda: [rect(c, x + side, y + down + bob, x + side, y + down + 1 + bob, PUPIL)
+                    for x, y in (left, right)]
+
+
+def draw_inspect(frame):
+    """Crouched over a motherboard, magnifying glass in his claw, squinting at the
+    chips. The glass slides along the board and catches the light."""
+    c = Canvas()
+    bob = frame % 2
+    cy = 13 + bob
+    glass_x = (19, 22, 25, 22)[frame]
+
+    # Legs braced on the board.
+    for i, x in enumerate((5, 8, 11)):
+        c.line(x, cy + 3, x - 1 + i, 24, SHELL_DARK, mirror=False)
+    # Body, side-on, hunched right over the board.
+    ellipse(c, 8, cy, 7, 4.5, lambda x, y: SHELL_LIGHT if y <= cy - 3 else
+            SHELL_DARK if y >= cy + 3 else SHELL)
+    # Eye stalks, both eyes down on the glass.
+    for x, top in ((6, 5), (11, 4)):
+        for y in range(top + bob, cy - 2):
+            c.set(x, y, SHELL)
+    pupils = eyes_looking(c, (5, 3), (10, 2), bob, down=1, side=1)
+    # Arm reaching down-right to the magnifier.
+    c.line(12, cy + 1, glass_x - 4, 18, SHELL, mirror=False)
+    grip_claw(c, glass_x - 5, 17)
+
+    draw_motherboard(c)
+    c.outline()
+    draw_magnifier(c, glass_x, 21)                  # glass goes on last: it's see-through
+    pupils()
+
+    c.set(13, cy + 2, OUTLINE)                      # "hmm" mouth
+    c.set(14, cy + 2, OUTLINE)
+    c.set(11, cy + 3, BLUSH)
+    if frame % 2:                                   # glint sweeping across the glass
+        c.set(glass_x - 1, 19, GLASS_GLINT)
+        c.set(glass_x, 19, GLASS_GLINT)
+    return c.image()
+
+
+# --- installing Ollama ------------------------------------------------------------
+
+BEZEL = (30, 30, 38, 255)
+SCREEN = (18, 22, 40, 255)
+CLOUD = (238, 244, 252, 255)
+CLOUD_DARK = (186, 200, 220, 255)
+ARROW = (90, 200, 255, 255)
+BAR_FILL = (90, 220, 130, 255)
+KEYS = (205, 205, 212, 255)
+
+
+def draw_install(frame):
+    """Sat at a desktop PC downloading his own brain: a cloud on the monitor with
+    an arrow pulling it down, a progress bar filling, claws mashing the keyboard."""
+    c = Canvas()
+    bob = frame % 2
+    cy = 19 + bob
+
+    # Monitor on the right, on the desk.
+    rect(c, 15, 3, 31, 20, BEZEL)
+    rect(c, 16, 4, 30, 18, SCREEN)
+    rect(c, 22, 21, 24, 24, PLASTIC)                # stand
+    rect(c, 19, 25, 28, 25, PLASTIC)                # base
+    # Cloud being yanked out of the internet, one pixel at a time.
+    rect(c, 20, 6, 27, 8, CLOUD)
+    rect(c, 22, 5, 25, 5, CLOUD)
+    rect(c, 20, 9, 27, 9, CLOUD_DARK)
+    for i in range(3):                              # data falling out of it
+        drop_y = 10 + (frame + i * 2) % 5
+        c.set(21 + i * 3, drop_y, ARROW)
+    c.line(24, 10, 24, 13, ARROW, mirror=False)     # download arrow
+    for dx in (-1, 0, 1):
+        c.set(24 + dx, 13, ARROW)
+    c.set(24, 14, ARROW)
+    # Progress bar, filling across the four frames.
+    rect(c, 17, 16, 29, 17, BEZEL)
+    rect(c, 18, 16, 18 + frame * 3, 17, BAR_FILL)
+
+    # The desk, and him sat behind it.
+    rect(c, 0, 26, 31, 27, WOOD)
+    rect(c, 0, 28, 31, 29, WOOD_DARK)
+    for i, x in enumerate((4, 7, 10)):               # legs dangling under the desk
+        c.line(x, cy + 3, x + (i - 1), 26, SHELL_DARK, mirror=False)
+    ellipse(c, 7, cy, 6.5, 4.5, lambda x, y: SHELL_LIGHT if y <= cy - 3 else
+            SHELL_DARK if y >= cy + 3 else SHELL)
+    for x, top in ((5, 7), (10, 6)):                 # eye stalks, watching the download
+        for y in range(top + bob, cy - 2):
+            c.set(x, y, SHELL)
+    pupils = eyes_looking(c, (4, 5), (9, 4), bob, down=1, side=1)  # eyes right, on the screen
+    rect(c, 2, 24, 11, 25, KEYS)                     # keyboard on the desk
+    c.line(12, cy, 13, 23, SHELL, mirror=False)      # arm down to it
+    grip_claw(c, 10, 21 + bob)                       # claw tapping keys
+    c.outline()
+    pupils()
+
+    for x in range(3, 11, 2):                        # key caps
+        c.set(x, 24, PLASTIC_LIGHT)
+    c.set(12, cy + 2, OUTLINE)                       # tiny grin
+    c.set(13, cy + 3, OUTLINE)
+    c.set(10, cy + 3, BLUSH)
+    return c.image()
+
+
 # --- sleeping in bed -------------------------------------------------------------
 
 WOOD = (150, 95, 55, 255)
@@ -473,6 +629,9 @@ FRAMES = {
         draw_crab(lean=1, legs=0, pull=True, eyes="strain", mouth="grit", bob=1),
     ],
     "sleep": [draw_bed(0), draw_bed(1)],
+    # Sizing up the machine, then downloading a brain to run on it.
+    "inspect": [draw_inspect(f) for f in range(4)],
+    "install": [draw_install(f) for f in range(4)],
     # Gaming scenes, facing right (the app mirrors them to face left).
     "game_modern": [draw_gamer("modern", f) for f in range(4)],
     "game_retro": [draw_gamer("retro", f) for f in range(4)],

@@ -34,13 +34,24 @@ py -m venv .venv
   Brain, Idle games, Voice, Potty mouth, quit
 
 ## His brain (local AI, optional)
-Runs 100% on your machine through [Ollama](https://ollama.com). He picks a model by RAM:
+Runs 100% on your machine through [Ollama](https://ollama.com).
+
+**He sets it up himself.** Right-click → **Brain** → **Find me a brain 🔍** (or just type
+"install ollama" / "check my specs" at him). He gets out a magnifying glass, crawls over
+a motherboard reading your RAM, cores and GPU, then hands you a ranked list of the models
+your machine can actually run, best pick first. Click **Install** and he sits down at a
+little PC and yanks Ollama out of the cloud for you (winget on Windows, Homebrew on Mac,
+the install script on Linux), then downloads the model. If that can't work he opens the
+download page instead.
 
 | RAM | Model | Download |
 |---|---|---|
 | 16 GB+ | `qwen3.5:4b` | 3.4 GB |
 | 8–16 GB | `qwen3.5:2b` | 2.7 GB |
 | under 8 GB | `qwen3:1.7b` (keywords pick actions, AI chats) | 1.4 GB |
+
+With a real GPU he sizes models against VRAM instead of RAM. To see what he sees:
+`python hardware.py`.
 
 ### Or use Claude Code / Codex
 Right-click → **Brain** → **Claude Code** or **Codex**. He finds the CLI if it's installed
@@ -64,6 +75,15 @@ File **names** in Desktop, Documents, Downloads, and OneDrive (skips hidden fold
 
 ## Change how he looks
 Edit `make_sprites.py`, then run `python make_sprites.py`. `assets/preview.png` shows every frame.
+
+## Keeping him up to date
+Right-click him (or the tray crab) → **Check for updates…**. He asks GitHub for the
+latest release, and if there's a newer one he sits down at his little PC, downloads it,
+swaps himself out and restarts as the new version. Nothing to reinstall.
+
+Releases are cut by tagging: `git tag v1.0.1 && git push --tags`. GitHub builds both
+platforms and publishes the zips the updater looks for. Bump `VERSION` in `update.py`
+to match the tag, or he'll think he's already current.
 
 ## Quitting him
 Click the **🦀 crab in the menu bar** (Mac) or **system tray** (Windows) → **Quit Pixel Buddy**.

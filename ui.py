@@ -324,6 +324,90 @@ class ResultCard(Panel):
         self.show_beside(near)
 
 
+class ModelCard(Panel):
+    """What he found under the hood, and which local brains this machine can run.
+    Pick one and he goes off to install it."""
+    chosen = Signal(str)
+    closed = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedWidth(430)
+        self.picks = []
+
+        header = QHBoxLayout()
+        self.title = QLabel("🔍 Your rig", objectName="title")
+        close = QPushButton("✕", objectName="close")
+        close.clicked.connect(self.close_card)
+        header.addWidget(self.title, 1)
+        header.addWidget(close)
+        self.body.addLayout(header)
+
+        self.specs = QLabel(wordWrap=True)
+        self.specs.setStyleSheet("font-size: 11px; color: #6a4a44;")
+        self.body.addWidget(self.specs)
+
+        self.list = QListWidget()
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.list.currentRowChanged.connect(self._sync_button)
+        self.body.addWidget(self.list)
+
+        buttons = QHBoxLayout()
+        self.install = QPushButton("Install")
+        self.install.clicked.connect(self._pick)
+        buttons.addWidget(self.install)
+        buttons.addStretch()
+        self.body.addLayout(buttons)
+
+    def _sync_button(self, row):
+        pick = self.picks[row] if 0 <= row < len(self.picks) else None
+        self.install.setEnabled(bool(pick))
+        self.install.setText(f"Install {pick.model}" if pick else "Install")
+
+    def _pick(self):
+        row = self.list.currentRow()
+        if 0 <= row < len(self.picks):
+            self.chosen.emit(self.picks[row].model)
+            self.hide()
+
+    def show_picks(self, specs, picks, near):
+        """specs: hardware.Specs. picks: hardware.Pick list, best first."""
+        self.picks = picks
+        self.specs.setText(escape(specs.summary()))
+        self.list.clear()
+        height = 8
+        for pick in picks:
+            grey = "" if pick.fits else "color:#9a8a86;"
+            row = QLabel(
+                f"<b style='{grey}'>{escape(pick.model)}</b> "
+                f"<span style='color:#8a5a50'>· {pick.size_gb:.1f} GB</span><br>"
+                f"<span style='color:#2a7a3a;{grey}'>{escape(pick.verdict)}</span><br>"
+                f"<span style='color:#6a4a44;{grey}'>{escape(pick.blurb)}</span>",
+                wordWrap=True,
+            )
+            row.setContentsMargins(6, 5, 6, 5)
+            width = self.width() - 60
+            row.setFixedWidth(width)
+            row.setParent(self.list.viewport())  # inherit the font before measuring
+            row.ensurePolished()
+            row.setFixedHeight(row.heightForWidth(width) + 6)
+            row.setAttribute(Qt.WA_TransparentForMouseEvents)
+            item = QListWidgetItem()
+            item.setSizeHint(row.sizeHint())
+            self.list.addItem(item)
+            self.list.setItemWidget(item, row)
+            height += row.sizeHint().height()
+        self.list.setFixedHeight(min(height, 360))
+        self.list.setCurrentRow(next((i for i, p in enumerate(picks) if p.fits), 0))
+        self.show_beside(near)
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key_Escape:
+            self.close_card()
+        else:
+            super().keyPressEvent(e)
+
+
 class WebCard(Panel):
     """Web search results: title, site, snippet. Double-click or Open to visit."""
     closed = Signal()
