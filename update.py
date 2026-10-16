@@ -16,7 +16,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-VERSION = "1.0.0"          # bump this and tag the release to match
+VERSION = "1.1.0"          # bump this and tag the release to match
 REPO = "FatBoy721/pixel-buddy"
 LATEST_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{REPO}/releases/latest"

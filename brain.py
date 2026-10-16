@@ -74,7 +74,7 @@ class RuleBrain:
 OLLAMA = "http://127.0.0.1:11434"
 HISTORY_LIMIT = 16  # messages sent to the model (keeps it fast on weak machines)
 
-PERSONA = """You are Crab, a tiny pixel-art crab who lives on the user's desktop.
+PERSONA = """You are Shellvis Pressley (spelled exactly that way), a tiny pixel-art crab who lives on the user's desktop.
 You're a little grumpy, very loyal, funny, and you keep replies SHORT (1-3 sentences).
 {voice}
 

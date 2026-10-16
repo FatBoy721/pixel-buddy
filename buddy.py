@@ -16,6 +16,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, QTimer, QUrl
@@ -27,6 +28,7 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QWidget
 
 import hardware
+import seasons
 import update
 import web
 from brain import (
@@ -47,8 +49,13 @@ SPRITE = SPRITE_PX * SCALE
 WIN_W, WIN_H = 420, 300     # room around the crab for bubbles and the carried file
 TICK_MS = 33                # ~30 fps movement
 FRAME_MS = {"walk": 140, "idle": 500, "sleep": 900, "happy": 250, "confused": 400, "pull": 170,
-            "game_modern": 160, "game_retro": 220, "inspect": 320, "install": 240}
+            "game_modern": 160, "game_retro": 220, "inspect": 320, "install": 240,
+            "crochet": 350}
 GAMING = ("game_modern", "game_retro")
+SEASON_FRAME_MS = {"carve": 300, "ghost": 260, "boo": 220, "apples": 280, "story": 450}  # only exist in a season's assets folder
+SEASON_ACTIVITIES = ("carve", "ghost", "apples", "story")
+COSTUME_HELLOS = {"slasher": "slasher_hello", "hockey": "hockey_hello", "screamer": "screamer_hello"}
+CROCHET_CHANCE = 0.15       # chance an idle break turns into crocheting
 GAME_CHANCE = 0.15          # chance an idle break turns into a gaming session
 GAME_SECONDS = (20, 45)
 GAME_STYLES = {"both": GAMING, "retro": ("game_retro",), "modern": ("game_modern",), "off": ()}
@@ -57,7 +64,7 @@ CORD_FROM, CORD_TO = (30, 21), (25, 21)
 WALK_SPEED = 1.6            # px per tick while wandering
 RUN_SPEED = 6.0             # searching / running off screen
 GRAVITY = 1.2
-SLEEP_AFTER_S = 60          # nap after this long without being clicked
+SLEEP_AFTER_S = 120         # nap after this long without being clicked
 MIN_SEARCH_S = 2.5          # always put on a bit of a show
 OFFSCREEN_S = 1.2           # how long he's "gone" fetching the file
 PREVIEW_WAIT_S = 5          # max extra time offscreen waiting for a preview image
@@ -166,11 +173,17 @@ def load_pixmap(path, scale):
     return pix.scaled(pix.width() * scale, pix.height() * scale, Qt.KeepAspectRatio, Qt.FastTransformation)
 
 
-def load_frames():
+def load_frames(season=None, look=None):
+    # Most specific art wins: assets/<season>/<look>/, then assets/<season>/, then assets/.
+    folders = [ASSETS / season / look] if season and look else []
+    folders += [ASSETS / season] if season else []
+    folders.append(ASSETS)
     frames = {}
-    for name in FRAME_MS:
-        paths = sorted(ASSETS.glob(f"{name}_*.png"))
+    for name in (*FRAME_MS, *SEASON_FRAME_MS):
+        paths = next((p for p in (sorted(f.glob(f"{name}_*.png")) for f in folders) if p), [])
         if not paths:
+            if name in SEASON_FRAME_MS:
+                continue  # no season art (or no season): just skip these states
             sys.exit(f"Missing sprites in {ASSETS}. Run: python make_sprites.py")
         frames[name] = [load_pixmap(p, SCALE) for p in paths]
     # Pull frames have the rope on his left and gaming frames face right; the "_r"
@@ -258,6 +271,7 @@ class Buddy(QWidget):
         self.think_job = None
         self.summary_job = None     # brain reading web results
         self.settings = load_settings()
+        self.refresh_season()
         self.voice = Voice(self.settings)
         self.brain_progress = ""    # set by the setup thread ("Downloading my brain… 42%")
         self.brain_job = None
@@ -391,6 +405,8 @@ class Buddy(QWidget):
 
     def tick(self):
         now = time.monotonic()
+        if date.today() != self.season_date:
+            self.refresh_season()
 
         if self.drag_offset is None:
             if self.falling:
@@ -405,7 +421,7 @@ class Buddy(QWidget):
             self.move(int(self.x_pos), int(self.y_pos))
 
         moving = self.state in ("walk", "pull")
-        frame_ms = FRAME_MS[self.state] * (WALK_SPEED / self.speed if moving else 1)
+        frame_ms = {**FRAME_MS, **SEASON_FRAME_MS}[self.state] * (WALK_SPEED / self.speed if moving else 1)
         if now - self.last_frame_at >= min(frame_ms, 900) / 1000:
             self.frame = (self.frame + 1) % len(self.frames[self.state])
             self.last_frame_at = now
@@ -497,16 +513,25 @@ class Buddy(QWidget):
                 self.pick_next_action()
         elif now >= self.state_until:
             self.pick_next_action()
-        elif self.state in GAMING and now >= self.next_game_line and now > self.bubble_until:
-            self.speak("gaming", 2.5)  # trash talk
+        elif (self.state in GAMING or self.state == "ghost") and now >= self.next_game_line and now > self.bubble_until:
+            self.speak("ghost" if self.state == "ghost" else "gaming", 2.5)  # trash talk / spooky noises
             self.next_game_line = now + random.uniform(6, 12)
 
     def pick_next_action(self):
         if time.monotonic() - self.last_poke > SLEEP_AFTER_S:
             self.set_state("sleep")
+        elif (self.season_level and "carve" in self.frames
+              and random.random() < seasons.ACTIVITY_CHANCE[self.season_level]):
+            state = random.choice(SEASON_ACTIVITIES)
+            self.set_state(state, random.uniform(15, 30))
+            self.speak(state, 2.5)
+            self.next_game_line = time.monotonic() + random.uniform(5, 9)
+        elif random.random() < CROCHET_CHANCE:
+            self.set_state("crochet", random.uniform(20, 40))
+            self.speak("crochet", 3)
         elif random.random() < GAME_CHANCE and self.game_choices():
             self.start_gaming()
-        elif random.random() < 0.6:
+        elif random.random() < 0.5:
             floor = self.floor_rect()
             self.target_x = random.randint(floor.left(), floor.right() - WIN_W)
             self.set_state("walk")
@@ -956,11 +981,38 @@ class Buddy(QWidget):
         elif self.mode in ("thinking", "searching", "found", "exiting", "offscreen", "returning"):
             self.speak("busy", 1.5)
         elif self.state == "sleep":
-            self.speak("wake", 1.5)
+            self.greet("wake", 1.5)
             self.set_state("idle", 1.5)
             QTimer.singleShot(900, self.open_chat)
+        elif self.season_level == "day" and "boo" in self.frames and random.random() < 1 / 3:
+            self.set_state("boo", 1.2)
+            self.speak("boo", 1.5)
+            QTimer.singleShot(1200, lambda: self.mode == "roam" and self.open_chat())
         else:
             self.open_chat()
+
+    def greet(self, key, seconds):
+        """Hello/wake line, swapped for a countdown or holiday line in season."""
+        if self.season_level == "countdown":
+            days = f"{self.days_left} day" + ("s" if self.days_left != 1 else "")
+            self.speak("countdown", seconds + 1, days=days)
+        elif self.look in COSTUME_HELLOS and random.random() < 0.5:
+            self.speak(COSTUME_HELLOS[self.look], seconds + 1)
+        elif self.season_level == "day" and self.season == "halloween":
+            self.speak("halloween_hello", seconds + 1)
+        else:
+            self.speak(key, seconds)
+
+    def refresh_season(self):
+        """Pick today's season (or the forced one) and load its sprites."""
+        self.season_date = date.today()
+        self.season, self.season_level, self.days_left, self.look = seasons.current(
+            self.season_date, self.settings.get("season", "auto"))
+        self.frames = load_frames(self.season, self.look)
+        if self.state not in self.frames:
+            self.set_state("idle", 1)
+        self.frame %= len(self.frames[self.state])
+        self._mask_key = None  # new sprites, new click shape
 
     # --- painting ------------------------------------------------------------
 
@@ -1008,6 +1060,8 @@ class Buddy(QWidget):
     # --- gaming -------------------------------------------------------------
 
     def game_choices(self):
+        if self.season:  # holiday months: seasonal activities replace gaming
+            return ()
         return GAME_STYLES.get(self.settings.get("game_style", "both"), GAMING)
 
     def start_gaming(self, state=None):
@@ -1228,6 +1282,16 @@ class Buddy(QWidget):
             action.triggered.connect(lambda _checked, k=key: self.set_game_style(k))
             games.addAction(action)
 
+        season_menu = menu.addMenu("Season")
+        current_season = self.settings.get("season", "auto")
+        for key, label in (("auto", "Auto (by date)"), ("off", "Off"), ("halloween", "Halloween (today's look)"),
+                           ("halloween/witch", "Halloween: Witch"), ("halloween/slasher", "Halloween: Slasher"),
+                           ("halloween/hockey", "Halloween: Hockey Mask"),
+                           ("halloween/screamer", "Halloween: Screamer")):
+            action = QAction(label, season_menu, checkable=True, checked=key == current_season)
+            action.triggered.connect(lambda _c, k=key: self.set_season(k))
+            season_menu.addAction(action)
+
         add(f"Check for updates…  (v{update.VERSION})", self.check_for_updates)
         add("Show crab" if not self.isVisible() else "Hide crab", self.toggle_hidden)
         voices = menu.addMenu("Voice: " + (self.voice.current_name() if self.voice.enabled else "Off 🔇"))
@@ -1279,6 +1343,11 @@ class Buddy(QWidget):
         self.voice.use(name)
         self.speak("new_voice", 3)
 
+    def set_season(self, key):
+        self.settings["season"] = key
+        save_settings(self.settings)
+        self.refresh_season()
+
     def set_game_style(self, key):
         self.settings["game_style"] = key
         save_settings(self.settings)
@@ -1301,7 +1370,7 @@ class Buddy(QWidget):
                 window.hide()
         else:
             self.show()
-            self.speak("wake", 2)
+            self.greet("wake", 2)
 
     def open_chat_from_tray(self):
         if not self.isVisible():
@@ -1377,7 +1446,7 @@ def main():
     listen_for_pokes(buddy)
     buddy.add_tray_icon()
     buddy.show()
-    buddy.speak("hello", 4)
+    buddy.greet("hello", 4)
     code = app.exec()
     stop_server()  # only stops Ollama if he started it
     # Exit now: don't wait on a half-finished file scan or web request in a worker thread.
