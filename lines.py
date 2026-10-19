@@ -105,6 +105,8 @@ CLEAN = {
     "voice_off": ["Okay, I'll keep it to the bubbles.", "Silent mode. Type \"unmute\" to hear me again.",
                   "Going quiet. You know where to find me."],
     "voice_on": ["I can talk again!", "Voice is back on!", "Ah, there's my voice."],
+    # Elvis outfits only: shaking it.
+    "dance": ["Uh-huh-huh.", "Watch these hips!", "Thank you. Thank you very much.", "Shake it, baby!"],
     "smarter_tip": ["Psst: want a smarter me? Install Claude Code or Codex, then right-click me → Brain."],
     "no_ai_tip": ["I've got no AI brain yet. Install Ollama (free, private) or Claude Code / Codex, "
                   "then right-click me → Brain."],

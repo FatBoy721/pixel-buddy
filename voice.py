@@ -6,6 +6,8 @@ Local voices need no extra downloads and work offline; the online ones need
 internet and quietly fall back to the local voice if a request fails."""
 
 import asyncio
+import hashlib
+import json
 import os
 import re
 import tempfile
@@ -36,6 +38,25 @@ ONLINE_VOICES = {
     "Natasha (online, Australian)": "en-AU-NatashaNeural",
 }
 ONLINE_RATE = "+10%"  # a little quick, to match the local RATE bias above
+
+# Shellvis: lines pre-baked into celebrity-style voices (local only, not in the repo),
+# one folder per voice under assets/. Each is offered only when its folder exists;
+# lines that weren't baked (anything with a file name or number in it) are read by
+# SHELLVIS_BASE instead.
+_ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+SHELLVIS_VOICES = {
+    "Shellvis (baked)": os.path.join(_ASSETS, "shellvis"),
+    "Young Shellvis (baked)": os.path.join(_ASSETS, "shellvis_young"),
+    "Cash Shellvis (baked)": os.path.join(_ASSETS, "shellvis_cash"),
+    "Coe Shellvis (baked)": os.path.join(_ASSETS, "shellvis_coe"),
+}
+SHELLVIS = "Shellvis (baked)"
+SHELLVIS_DIR = SHELLVIS_VOICES[SHELLVIS]
+SHELLVIS_BASE = "en-US-GuyNeural"
+
+
+def shellvis_file(words, folder=SHELLVIS_DIR):
+    return os.path.join(folder, hashlib.sha1(words.encode()).hexdigest()[:16] + ".wav")
 
 
 def speakable(text):
@@ -109,6 +130,8 @@ class Voice:
         self._workers = set()  # keeps in-flight QThreads alive until they finish
         self._worker = None    # the one whose result we still want
         self._online_voice = None  # edge-tts voice id currently selected, or None
+        self._shellvis = None  # label of the baked Shellvis voice in use, or None
+        self._persona = {}
         self.use(settings.get("voice_name"))
 
     @property
@@ -122,14 +145,29 @@ class Voice:
     def voices(self):
         """English voices, local and online, sorted by name (the menu lists these)."""
         online = [_OnlineVoice(label) for label in ONLINE_VOICES] if edge_tts else []
+        if edge_tts:
+            online += [_OnlineVoice(label) for label, d in SHELLVIS_VOICES.items() if os.path.isdir(d)]
         return sorted([*self._local_voices(), *online], key=lambda v: v.name())
 
     def current_name(self):
+        if self._shellvis:
+            return self._shellvis
         if self._online_voice:
             return next(label for label, vid in ONLINE_VOICES.items() if vid == self._online_voice)
         return self.tts.voice().name()
 
     def use(self, name=None):
+        ok = edge_tts and name in SHELLVIS_VOICES and os.path.isdir(SHELLVIS_VOICES[name])
+        self._shellvis = name if ok else None
+        self._persona = {}
+        if self._shellvis:
+            try:  # {line: how this voice says it}, so the bubble matches what you hear
+                with open(os.path.join(SHELLVIS_VOICES[name], "lines.json"), encoding="utf-8") as f:
+                    self._persona = json.load(f)
+            except (OSError, ValueError):
+                pass
+            self._online_voice = SHELLVIS_BASE
+            return
         if edge_tts and name in ONLINE_VOICES:
             self._online_voice = ONLINE_VOICES[name]
             return
@@ -139,6 +177,11 @@ class Voice:
         if pick:
             self.tts.setVoice(voices[pick])
 
+    def shown(self, text):
+        """The bubble text: the baked voice's own wording of a line, if it has one."""
+        persona = self._persona.get(speakable(text)) if self._shellvis else None
+        return re.sub(r"\(([a-z ]+)\)", r"*\1*", persona) if persona else text  # (sigh) -> *sigh*
+
     def say(self, text):
         if not self.enabled:
             return
@@ -146,7 +189,10 @@ class Voice:
         if not words:
             return
         self.stop()  # newest line wins; no backlog of old grunts
-        if self._online_voice:
+        if self._shellvis and os.path.exists(baked := shellvis_file(words, SHELLVIS_VOICES[self._shellvis])):
+            self._player.setSource(QUrl.fromLocalFile(baked))  # not a temp file: never discarded
+            self._player.play()
+        elif self._online_voice:
             worker = _EdgeSpeech(words, self._online_voice)
             self._worker = worker
             self._workers.add(worker)

@@ -210,6 +210,7 @@ def draw_crab(bob=0, legs=0, claw=CLAW_OPEN, claw_lift=0, eyes="open", mouth="sm
         "smile": ((14, 1), (15, 2), (16, 2), (17, 1)),
         "wavy": ((14, 2), (15, 1), (16, 2), (17, 1)),
         "grit": ((13, 1), (14, 1), (15, 1), (16, 1), (17, 1), (18, 1)),
+        "curl": ((14, 2), (15, 2), (16, 1), (17, 0)),  # Elvis lip curl
     }[mouth]
     for x, dy in mouth_px:
         c.set(x, cy + dy, OUTLINE)
@@ -949,6 +950,92 @@ def draw_story(frame):
 HALLOWEEN_LOOKS = {"witch": witch_hat, "slasher": slasher, "hockey": hockey, "screamer": screamer}
 
 
+# --- Elvis outfits (worn while an Elvis voice is picked) -----------------------------
+
+HAIR = (22, 18, 30, 255)
+HAIR_SHINE = (78, 80, 120, 255)
+LAME = body_colors((214, 170, 52, 255), (246, 212, 96, 255), (168, 124, 30, 255))  # gold lamé, 1957
+LAME_GLINT = (255, 246, 190, 255)
+SHIRT = (30, 26, 34, 255)
+JUMP = body_colors((236, 236, 230, 255), (252, 252, 248, 255), (196, 196, 190, 255))  # white jumpsuit, 70s
+STUDS = ((228, 186, 60, 255), (220, 50, 60, 255), (70, 120, 230, 255))
+BELT = (222, 176, 52, 255)
+BELT_DARK = (160, 118, 30, 255)
+SHADES = (70, 46, 30, 255)
+
+
+def pompadour(layer, bob):
+    """Tall black quiff swept up over his eyes, curling forward at the front."""
+    rows = {0: (18, 22), 1: (15, 23), 2: (13, 23), 3: (11, 22), 4: (10, 21), 5: (10, 20), 6: (10, 11)}
+    for y, (x0, x1) in rows.items():
+        for x in range(x0, x1 + 1):
+            layer.set(x, y + bob, HAIR)
+    for x, y in ((23, 3), (24, 4), (24, 5)):                       # the curl dropping over the front
+        layer.set(x, y + bob, HAIR)
+    for x, y in ((17, 1), (18, 1), (15, 2), (16, 2), (13, 3), (14, 3)):
+        layer.set(x, y + bob, HAIR_SHINE)                          # brylcreem shine along the swoop
+
+
+def elvis57(c, bob, lean):
+    """1957: gold lamé suit over a dark shirt, black pompadour."""
+    recolor_body(c, LAME, 15 + bob)
+    cy = 19 + bob
+    for x, y in ((15, cy - 4), (16, cy - 4), (15, cy - 3), (16, cy - 3)):   # dark shirt under the lapels
+        if 0 <= x + lean < SIZE and c.px[y][x + lean] in LAME.values():
+            c.px[y][x + lean] = SHIRT
+    for x, y in ((9, cy - 1), (21, cy), (12, cy + 3), (19, cy - 3), (24, cy + 1)):  # lamé glints
+        if 0 <= x + lean < SIZE and c.px[y][x + lean] in LAME.values():
+            c.px[y][x + lean] = LAME_GLINT
+    layer = Canvas()
+    pompadour(layer, bob)
+    stamp_layer(c, layer, lean)
+
+
+def elvis70s(c, bob, lean):
+    """70s: white jumpsuit, popped collar, rhinestones, big gold belt, gold aviators."""
+    recolor_body(c, JUMP, 15 + bob)
+    cy = 19 + bob
+    for i, (x, y) in enumerate(((9, cy - 1), (12, cy - 2), (19, cy - 2), (22, cy - 1), (8, cy + 1), (23, cy + 1))):
+        if 0 <= x + lean < SIZE and c.px[y][x + lean] in JUMP.values():
+            c.px[y][x + lean] = STUDS[i % 3]                       # rhinestones
+    layer = Canvas()
+    for x in (8, 9, 22, 23):                                       # high popped collar, both sides
+        for y in range(cy - 7, cy - 3):
+            layer.set(x, y, JUMP[SHELL_LIGHT])
+    for x in range(8, 24):                                         # belt
+        layer.set(x, cy + 3, BELT)
+    for x in range(13, 19):                                        # big buckle
+        layer.set(x, cy + 2, BELT)
+        layer.set(x, cy + 4, BELT)
+    pompadour(layer, bob)
+    stamp_layer(c, layer, lean)
+    def put(x, y, color):  # straight onto the pixels: c.set would add the lean twice
+        if 0 <= x + lean < SIZE:
+            c.px[y][x + lean] = color
+    for x in range(14, 18):
+        put(x, cy + 3, BELT_DARK)                                  # buckle plate
+    for x0 in (11, 18):                                            # aviators over his eyes
+        for x in range(x0, x0 + 3):
+            put(x, 8 + bob, BELT)
+            put(x, 9 + bob, SHADES)
+            put(x, 10 + bob, SHADES)
+    for x in range(14, 18):
+        put(x, 9 + bob, BELT)                                      # bridge
+    put(12, 9 + bob, (150, 110, 80, 255))                          # lens glint
+
+
+def draw_dance(frame):
+    """The swivel: hips rock side to side over planted feet, legs shaking, claw jabbing up,
+    lip curled."""
+    lean = (-3, 0, 3, 0)[frame]
+    return draw_crab(bob=frame % 2, legs=frame % 2, lean=lean, claw=CLAW_HALF if frame % 2 else CLAW_OPEN,
+                     claw_lift=3 if frame % 2 == 0 else 1, eyes="happy" if frame == 3 else "open", mouth="curl")
+
+
+OUTFIT_LOOKS = {"elvis57": elvis57, "elvis70s": elvis70s}
+OUTFIT_STATES = ("walk", "idle", "happy", "confused", "pull", "peek", "crochet")
+
+
 HALLOWEEN_HATTED = ("walk", "idle", "happy", "confused", "pull", "peek", "crochet")
 
 
@@ -1094,14 +1181,28 @@ def main():
         preview_rows.append([f for fs in frames.values() for f in fs])
     preview_rows[1] += [draw_ghost(f) for f in range(4)]
 
-    # Preview sheet (8x scale): row 0 = everyday frames, then one row per Halloween look.
+    # Elvis outfits: worn while an Elvis voice is picked (assets/outfit/<look>/), with his dance.
+    shutil.rmtree(ASSETS / "outfit", ignore_errors=True)
+    for look, hat in OUTFIT_LOOKS.items():
+        HAT = hat
+        frames = {k: v for k, v in build_frames().items() if k in OUTFIT_STATES}
+        frames["dance"] = [draw_dance(f) for f in range(4)]
+        HAT = None
+        (ASSETS / "outfit" / look).mkdir(parents=True)
+        for name, imgs in frames.items():
+            for i, frame in enumerate(imgs):
+                frame.save(ASSETS / "outfit" / look / f"{name}_{i}.png")
+        preview_rows.append([f for fs in frames.values() for f in fs])
+
+    # Preview sheet (8x scale): row 0 = everyday frames, one row per Halloween look, then outfits.
     width = max(len(r) for r in preview_rows)
     sheet = Image.new("RGBA", (SIZE * width, SIZE * len(preview_rows)), (200, 220, 235, 255))
     for row, frames in enumerate(preview_rows):
         for i, frame in enumerate(frames):
             sheet.alpha_composite(frame, (i * SIZE, row * SIZE))
     sheet.resize((sheet.width * 8, sheet.height * 8), Image.NEAREST).save(ASSETS / "preview.png")
-    print(f"Wrote {len(preview_rows[0])} frames + {len(preview_rows) - 1} Halloween looks to {ASSETS}")
+    print(f"Wrote {len(preview_rows[0])} frames + {len(HALLOWEEN_LOOKS)} Halloween looks"
+          f" + {len(OUTFIT_LOOKS)} outfits to {ASSETS}")
 
 if __name__ == "__main__":
     main()

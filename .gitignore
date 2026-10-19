@@ -5,3 +5,15 @@ __pycache__/
 *.pyc
 .DS_Store
 .omc/
+assets/shellvis/
+make_shellvis.py
+shellvis_tts.py
+assets/shellvis_edge_backup/
+assets/shellvis_young/
+assets/shellvis_70s_rvc_backup/
+shellvis_young_breeze.py
+shellvis_elvis.json
+assets/shellvis_cash/
+assets/shellvis_coe/
+shellvis_cash.json
+shellvis_coe.json

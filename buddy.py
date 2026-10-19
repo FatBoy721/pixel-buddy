@@ -52,7 +52,11 @@ FRAME_MS = {"walk": 140, "idle": 500, "sleep": 900, "happy": 250, "confused": 40
             "game_modern": 160, "game_retro": 220, "inspect": 320, "install": 240,
             "crochet": 350}
 GAMING = ("game_modern", "game_retro")
-SEASON_FRAME_MS = {"carve": 300, "ghost": 260, "boo": 220, "apples": 280, "story": 450}  # only exist in a season's assets folder
+SEASON_FRAME_MS = {"carve": 300, "ghost": 260, "boo": 220, "apples": 280, "story": 450,  # only exist in a season's
+                   "dance": 120}                                                        # or outfit's assets folder
+# Elvis voices dress him for their era (assets/outfit/<look>/) and unlock his dance.
+OUTFITS = {"Young Shellvis (baked)": "elvis57", "Shellvis (baked)": "elvis70s"}
+DANCE_CHANCE = 0.15
 SEASON_ACTIVITIES = ("carve", "ghost", "apples", "story")
 COSTUME_HELLOS = {"slasher": "slasher_hello", "hockey": "hockey_hello", "screamer": "screamer_hello"}
 CROCHET_CHANCE = 0.15       # chance an idle break turns into crocheting
@@ -173,9 +177,10 @@ def load_pixmap(path, scale):
     return pix.scaled(pix.width() * scale, pix.height() * scale, Qt.KeepAspectRatio, Qt.FastTransformation)
 
 
-def load_frames(season=None, look=None):
-    # Most specific art wins: assets/<season>/<look>/, then assets/<season>/, then assets/.
-    folders = [ASSETS / season / look] if season and look else []
+def load_frames(season=None, look=None, outfit=None):
+    # Most specific art wins: assets/outfit/<outfit>/, assets/<season>/<look>/, assets/<season>/, assets/.
+    folders = [ASSETS / "outfit" / outfit] if outfit else []
+    folders += [ASSETS / season / look] if season and look else []
     folders += [ASSETS / season] if season else []
     folders.append(ASSETS)
     frames = {}
@@ -271,8 +276,8 @@ class Buddy(QWidget):
         self.think_job = None
         self.summary_job = None     # brain reading web results
         self.settings = load_settings()
-        self.refresh_season()
         self.voice = Voice(self.settings)
+        self.refresh_season()  # after the voice: an Elvis voice picks his outfit
         self.brain_progress = ""    # set by the setup thread ("Downloading my brain… 42%")
         self.brain_job = None
         self.load_brain()
@@ -383,9 +388,9 @@ class Buddy(QWidget):
 
     def say(self, text, seconds=3):
         text = clean_language(text)
-        self.bubble = fit_bubble(text)
+        self.bubble = fit_bubble(clean_language(self.voice.shown(text)))
         self.bubble_until = time.monotonic() + seconds
-        self.voice.say(text)  # full text, even if the bubble had to be trimmed
+        self.voice.say(text)  # full original text: baked wavs are keyed by it
 
     def walk_toward(self, target, speed, sprite="walk"):
         """Step toward target x. Returns True on arrival."""
@@ -526,6 +531,9 @@ class Buddy(QWidget):
             self.set_state(state, random.uniform(15, 30))
             self.speak(state, 2.5)
             self.next_game_line = time.monotonic() + random.uniform(5, 9)
+        elif "dance" in self.frames and random.random() < DANCE_CHANCE:
+            self.set_state("dance", random.uniform(3, 6))
+            self.speak("dance", 2.5)
         elif random.random() < CROCHET_CHANCE:
             self.set_state("crochet", random.uniform(20, 40))
             self.speak("crochet", 3)
@@ -1008,7 +1016,7 @@ class Buddy(QWidget):
         self.season_date = date.today()
         self.season, self.season_level, self.days_left, self.look = seasons.current(
             self.season_date, self.settings.get("season", "auto"))
-        self.frames = load_frames(self.season, self.look)
+        self.frames = load_frames(self.season, self.look, OUTFITS.get(self.voice.current_name()))
         if self.state not in self.frames:
             self.set_state("idle", 1)
         self.frame %= len(self.frames[self.state])
@@ -1341,7 +1349,10 @@ class Buddy(QWidget):
         self.settings["voice_on"] = True
         save_settings(self.settings)
         self.voice.use(name)
+        self.refresh_season()  # an Elvis voice changes his outfit too
         self.speak("new_voice", 3)
+        if "dance" in self.frames and self.mode == "roam":
+            self.set_state("dance", 3)  # show off the new look
 
     def set_season(self, key):
         self.settings["season"] = key
