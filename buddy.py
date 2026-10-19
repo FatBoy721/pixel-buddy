@@ -1004,7 +1004,7 @@ class Buddy(QWidget):
         if self.season_level == "countdown":
             days = f"{self.days_left} day" + ("s" if self.days_left != 1 else "")
             self.speak("countdown", seconds + 1, days=days)
-        elif self.look in COSTUME_HELLOS and random.random() < 0.5:
+        elif self.look in COSTUME_HELLOS and not self.outfit and random.random() < 0.5:
             self.speak(COSTUME_HELLOS[self.look], seconds + 1)
         elif self.season_level == "day" and self.season == "halloween":
             self.speak("halloween_hello", seconds + 1)
@@ -1017,8 +1017,8 @@ class Buddy(QWidget):
         self.season, self.season_level, self.days_left, self.look = seasons.current(
             self.season_date, self.settings.get("season", "auto"))
         # Last pick wins: an Elvis voice puts the outfit on, picking a season look takes it off.
-        outfit = OUTFITS.get(self.voice.current_name()) if self.settings.get("wear_outfit", True) else None
-        self.frames = load_frames(self.season, self.look, outfit)
+        self.outfit = OUTFITS.get(self.voice.current_name()) if self.settings.get("wear_outfit", True) else None
+        self.frames = load_frames(self.season, self.look, self.outfit)
         if self.state not in self.frames:
             self.set_state("idle", 1)
         self.frame %= len(self.frames[self.state])
@@ -1347,9 +1347,10 @@ class Buddy(QWidget):
 
     def set_voice(self, name):
         """Picking a voice also turns talking back on."""
+        if name != self.settings.get("voice_name") or self.settings.get("voice_on", True):
+            self.settings["wear_outfit"] = True  # a real voice pick, not just unmuting the same one
         self.settings["voice_name"] = name
         self.settings["voice_on"] = True
-        self.settings["wear_outfit"] = True
         save_settings(self.settings)
         self.voice.use(name)
         self.refresh_season()  # an Elvis voice changes his outfit too

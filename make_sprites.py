@@ -998,22 +998,24 @@ def elvis70s(c, bob, lean):
     for i, (x, y) in enumerate(((9, cy - 1), (12, cy - 2), (19, cy - 2), (22, cy - 1), (8, cy + 1), (23, cy + 1))):
         if 0 <= x + lean < SIZE and c.px[y][x + lean] in JUMP.values():
             c.px[y][x + lean] = STUDS[i % 3]                       # rhinestones
-    layer = Canvas()
-    for x in (8, 9, 22, 23):                                       # high popped collar, both sides
-        for y in range(cy - 7, cy - 3):
-            layer.set(x, y, JUMP[SHELL_LIGHT])
-    for x in range(8, 24):                                         # belt
-        layer.set(x, cy + 3, BELT)
+    def put(x, y, color, onto=None):  # straight onto the pixels: c.set would add the lean twice
+        if 0 <= x + lean < SIZE and 0 <= y < SIZE and (onto is None or c.px[y][x + lean] in onto):
+            c.px[y][x + lean] = color
+    suit = set(JUMP.values()) | set(STUDS)
+    for x in range(8, 24):                                         # belt: only on the suit, never over props
+        put(x, cy + 3, BELT, suit)
     for x in range(13, 19):                                        # big buckle
-        layer.set(x, cy + 2, BELT)
-        layer.set(x, cy + 4, BELT)
+        put(x, cy + 2, BELT, suit)
+        put(x, cy + 4, BELT, suit)
+    for x in range(14, 18):
+        put(x, cy + 3, BELT_DARK, suit | {BELT})                   # buckle plate
+    layer = Canvas()
+    for x in (8, 9, 22, 23):                                       # high popped collar, only in open air
+        for y in range(cy - 7, cy - 3):
+            if 0 <= x + lean < SIZE and c.px[y][x + lean] in (CLEAR, OUTLINE):
+                layer.set(x, y, JUMP[SHELL_LIGHT])
     pompadour(layer, bob)
     stamp_layer(c, layer, lean)
-    def put(x, y, color):  # straight onto the pixels: c.set would add the lean twice
-        if 0 <= x + lean < SIZE:
-            c.px[y][x + lean] = color
-    for x in range(14, 18):
-        put(x, cy + 3, BELT_DARK)                                  # buckle plate
     for x0 in (11, 18):                                            # aviators over his eyes
         for x in range(x0, x0 + 3):
             put(x, 8 + bob, BELT)
@@ -1187,6 +1189,10 @@ def main():
         HAT = hat
         frames = {k: v for k, v in build_frames().items() if k in OUTFIT_STATES}
         frames["dance"] = [draw_dance(f) for f in range(4)]
+        # Halloween activities in the outfit too, so he doesn't swap clothes mid-season.
+        # The app only starts these in season, so having them here year-round is harmless.
+        frames |= {"carve": [draw_carve(f) for f in range(4)], "boo": [draw_boo(f) for f in range(4)],
+                   "apples": [draw_apples(f) for f in range(4)], "story": [draw_story(f) for f in range(4)]}
         HAT = None
         (ASSETS / "outfit" / look).mkdir(parents=True)
         for name, imgs in frames.items():
