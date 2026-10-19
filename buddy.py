@@ -1016,7 +1016,9 @@ class Buddy(QWidget):
         self.season_date = date.today()
         self.season, self.season_level, self.days_left, self.look = seasons.current(
             self.season_date, self.settings.get("season", "auto"))
-        self.frames = load_frames(self.season, self.look, OUTFITS.get(self.voice.current_name()))
+        # Last pick wins: an Elvis voice puts the outfit on, picking a season look takes it off.
+        outfit = OUTFITS.get(self.voice.current_name()) if self.settings.get("wear_outfit", True) else None
+        self.frames = load_frames(self.season, self.look, outfit)
         if self.state not in self.frames:
             self.set_state("idle", 1)
         self.frame %= len(self.frames[self.state])
@@ -1347,6 +1349,7 @@ class Buddy(QWidget):
         """Picking a voice also turns talking back on."""
         self.settings["voice_name"] = name
         self.settings["voice_on"] = True
+        self.settings["wear_outfit"] = True
         save_settings(self.settings)
         self.voice.use(name)
         self.refresh_season()  # an Elvis voice changes his outfit too
@@ -1356,6 +1359,7 @@ class Buddy(QWidget):
 
     def set_season(self, key):
         self.settings["season"] = key
+        self.settings["wear_outfit"] = key == "off"  # a season look replaces the Elvis outfit
         save_settings(self.settings)
         self.refresh_season()
 
