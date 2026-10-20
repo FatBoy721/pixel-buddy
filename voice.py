@@ -49,6 +49,10 @@ SHELLVIS_VOICES = {
     "Young Shellvis (baked)": os.path.join(_ASSETS, "shellvis_young"),
     "Cash Shellvis (baked)": os.path.join(_ASSETS, "shellvis_cash"),
     "Coe Shellvis (baked)": os.path.join(_ASSETS, "shellvis_coe"),
+    "Larry Shellvis (baked)": os.path.join(_ASSETS, "shellvis_larry"),
+    "SpongeBob Shellvis (baked)": os.path.join(_ASSETS, "shellvis_sponge"),
+    "Ron Shellvis (baked)": os.path.join(_ASSETS, "shellvis_ron"),
+    "Katt Shellvis (baked)": os.path.join(_ASSETS, "shellvis_katt"),
 }
 SHELLVIS = "Shellvis (baked)"
 SHELLVIS_DIR = SHELLVIS_VOICES[SHELLVIS]

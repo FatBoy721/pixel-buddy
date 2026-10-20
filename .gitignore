@@ -17,3 +17,5 @@ assets/shellvis_cash/
 assets/shellvis_coe/
 shellvis_cash.json
 shellvis_coe.json
+assets/shellvis_*/
+shellvis_*.json
